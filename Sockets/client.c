@@ -27,10 +27,12 @@ typedef struct Token {
     in_addr_t join_ip_address;
     in_port_t join_port;
     int cnt;
+    int is_free;
     Message_Type message_type;
 }Token;
 
 Token token;
+Token tmp_token;
 char *user_id;
 in_addr_t ip_address;
 int out_port;
@@ -40,30 +42,39 @@ int out_tcp_socket;
 int in_tcp_socket;
 int udp_socket;
 enum IP_Protocol protocol;
+int is_pending_join = 0;
+
+in_addr_t joining_ip_address = 0;
+int joining_port = 0;
 
 void send_message(Message_Type message_type);
 void receive_message();
 void clean_exit();
 void error_exit(char *error_message);
 void parse_args(int argc, char **argv);
-void connect_to_token_ring();
+void initialise_socket();
 void *connect_out_tcp_socket(void *pVoid);
 void *connect_in_tcp_socket(void *pVoid);
 void handle_join(struct sockaddr_in addr);
+void join_token_ring();
 void handle_message();
+void *udp_receive(void *pVoid);
+void *udp_send(void *pVoid);
 
 int main(int argc, char** argv){
     atexit(clean_exit);
     parse_args(argc, argv);
-    connect_to_token_ring();
+    initialise_socket();
 
-    send_message(JOIN);
-//    receive_message();
+    join_token_ring();
 
     while(1){
+//        fprintf(stderr, "xd ");
         send_message(SEND);
+//        fprintf(stderr, "xd2 ");
         receive_message();
-        sleep(1);
+//        fprintf(stderr, "xd3\n");
+        usleep(100000);
     }
 
 }
@@ -112,11 +123,11 @@ void parse_args(int argc, char **argv){
         token.cnt = 0;
         token.join_port = 0;
         token.join_ip_address = 0;
+        token.is_free = 1;
     }
-
 }
 
-void connect_to_token_ring(){
+void initialise_socket(){
 
     switch (protocol) {
         case TCP: {
@@ -206,30 +217,70 @@ void *connect_in_tcp_socket(void *pVoid){
     printf("TCP in socket initialised with address: %s port: %d\n", my_ip, my_port);
 }
 
-void send_message(Message_Type message_type){
-    struct sockaddr_in out_address;
-    bzero(&out_address, sizeof(out_address));
-    out_address.sin_family = AF_INET;
-    out_address.sin_addr.s_addr = ip_address;
-    out_address.sin_port = htons((uint16_t) out_port);
-
-
-    switch (message_type){
-        case JOIN:
-            token.message_type = JOIN;
-            if (sendto(udp_socket, &token, sizeof(token), 0, (const struct sockaddr *) &out_address, sizeof(out_address)) !=
-                sizeof(token))
-                error_exit("message send failure");
-            break;
-        case SEND:
-            if (!have_token)
-                return;
-            token.message_type = SEND;
-            if (sendto(udp_socket, &token, sizeof(token), 0, (const struct sockaddr *) &out_address, sizeof(out_address)) !=
-                sizeof(token))
-                error_exit("message send failure");
-            have_token = 0;
+void *udp_receive(void *pVoid){
+    while (1){
+        receive_message();
     }
+}
+
+void *udp_send(void *pVoid){
+   while (1){
+       send_message(SEND);
+       sleep(1);
+   }
+}
+
+void join_token_ring(){
+    struct sockaddr_in address;
+    bzero(&address, sizeof(address));
+    address.sin_family = AF_INET;
+    address.sin_addr.s_addr = ip_address;
+    address.sin_port = htons((uint16_t) out_port);
+
+    token.message_type = JOIN;
+    token.join_ip_address = ip_address;
+    token.join_port = (in_port_t) in_port;
+    if (sendto(udp_socket, &token, sizeof(token), 0, (const struct sockaddr *) &address, sizeof(address)) !=
+        sizeof(token)) {
+        error_exit("message send failure");
+    }
+    printf("Send join message to %s %d\n", inet_ntoa(address.sin_addr), ntohs(address.sin_port));
+
+    receive_message();
+    printf("joined to %s %d\n", inet_ntoa(address.sin_addr), ntohs(address.sin_port));
+}
+
+void send_message(Message_Type message_type){
+    struct sockaddr_in address;
+    bzero(&address, sizeof(address));
+    address.sin_family = AF_INET;
+    address.sin_addr.s_addr = ip_address;
+    address.sin_port = htons((uint16_t) out_port);
+
+    if (!have_token) {
+        fprintf(stderr, "xd3\n");
+        return;
+    }
+
+    token.message_type = SEND;
+    tmp_token.message_type = SEND;
+    if(is_pending_join){
+        if (sendto(udp_socket, &tmp_token, sizeof(tmp_token), 0, (const struct sockaddr *) &address, sizeof(address)) !=
+            sizeof(token)) {
+            error_exit("message send failure");
+        }
+        printf("Send join info message to %s %d\n", inet_ntoa(address.sin_addr), ntohs(address.sin_port));
+        have_token = 0;
+        is_pending_join = 0;
+        return;
+    }
+
+    if (sendto(udp_socket, &token, sizeof(token), 0, (const struct sockaddr *) &address, sizeof(address)) !=
+        sizeof(token)) {
+        error_exit("message send failure");
+    }
+    printf("Send message to %s %d\n", inet_ntoa(address.sin_addr), ntohs(address.sin_port));
+    have_token = 0;
 }
 
 void receive_message(){
@@ -239,45 +290,50 @@ void receive_message(){
         error_exit("message receive failure");
 
     if(token.message_type == JOIN){
-        printf("Received join request\n");
         handle_join(address);
         return;
     }
+
     have_token = 1;
-    if(token.dest_ip_address == ip_address && token.dest_port == udp_socket)
+    if(token.dest_ip_address == ip_address && ntohs(token.dest_port) == in_port)
         handle_message();
 
     token.cnt ++;
-    printf("Received message: %s, %d\n", token.message, token.cnt);
+    printf("Received message: %s, %d from %s %d\n", token.message, token.cnt, inet_ntoa(address.sin_addr), ntohs(address.sin_port));
 }
 
-void handle_join(struct sockaddr_in join_address){
+void handle_join(struct sockaddr_in addr){
+    printf("Received join request from %s %d\n", inet_ntoa(addr.sin_addr), ntohs(addr.sin_port));
+
+    if (addr.sin_addr.s_addr==ip_address && ntohs(addr.sin_port)==in_port){
+        return;
+    }
+
     struct sockaddr_in address;
     int len = sizeof(address);
-//    if(!have_token){
-        if(recvfrom(udp_socket, &token, sizeof(token), 0, (struct sockaddr *) &address, &len) != sizeof(token))
-            error_exit("message receive failure");
-        have_token = 1;
-//    }
-
-    token.dest_ip_address = address.sin_addr.s_addr;
-    token.dest_port = address.sin_port;
-    token.join_ip_address = join_address.sin_addr.s_addr;
-    token.join_port = join_address.sin_port;
+    if(recvfrom(udp_socket, &token, sizeof(token), 0, (struct sockaddr *) &address, &len) != sizeof(token))
+        error_exit("message receive failure");
+    have_token = 1;
+    printf("Join handler function\n");
+    tmp_token.dest_port = address.sin_port;
+    tmp_token.dest_ip_address = address.sin_addr.s_addr;
+    tmp_token.join_port = addr.sin_port;
+    tmp_token.join_ip_address = addr.sin_addr.s_addr;
+    is_pending_join = 1;
 
 }
 
 void handle_message(){
+    fprintf(stderr, "xd ");
     token.dest_ip_address = 0;
     token.dest_port = 0;
     if(token.join_port != 0){
         ip_address = token.join_ip_address;
-        udp_socket = token.join_port;
+        out_port = htons(token.join_port);
         token.join_port = 0;
         token.join_ip_address = 0;
     }
 }
-
 
 void error_exit(char *error_message) {
     perror(error_message);
