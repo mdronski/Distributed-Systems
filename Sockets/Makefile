@@ -1,4 +1,4 @@
 all: compile
 
 compile:
-	gcc client.c -o client -pthread
+	gcc client_udp.c -o udp -pthread
