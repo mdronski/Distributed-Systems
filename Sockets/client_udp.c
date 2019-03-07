@@ -25,6 +25,7 @@ typedef struct Token {
     in_addr_t join_ip_address;
     in_port_t join_port;
     int cnt;
+    int ttl;
     Message_Type message_type;
 } Token;
 
@@ -121,6 +122,8 @@ void send_message(int sig) {
 
     strcpy(pending_id, buffer1);
     strcpy(pending_message, buffer2);
+
+    token.ttl = 3;
 }
 
 void parse_args(int argc, char **argv) {
@@ -261,7 +264,18 @@ void handle_full(){
     if (strcmp(token.dest_id, user_id) == 0){
         handle_message();
     }
-    token.cnt ++;
+    if(strcmp(user_id, token.source_id) == 0){
+        token.ttl--;
+        if (token.ttl <= 0){
+            fprintf(stderr, "\nMessage to %s deleted due to TTL\n", token.dest_id);
+            memset(token.dest_id, 0, 64);
+            memset(token.message, 0, 64);
+            memset(token.source_id, 0, 64);
+            token.message_type = FREE;
+        }
+    }
+
+        token.cnt ++;
 }
 
 void handle_return(){

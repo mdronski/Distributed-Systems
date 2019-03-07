@@ -12,7 +12,11 @@ sock.bind((MCAST_GRP, MCAST_PORT))
 mreq = struct.pack("4sl", socket.inet_aton(MCAST_GRP), socket.INADDR_ANY)
 sock.setsockopt(socket.IPPROTO_IP, socket.IP_ADD_MEMBERSHIP, mreq)
 
+logfile = open("log.txt","w+")
+
 while True:
     data, address = sock.recvfrom(64)
     now = datetime.now()
+    line = str(now)[:-7] + ' ' + str(data.decode('utf-8') + '\n')
+    logfile.write(line)
     print (str(now)[:-7], data.decode('utf-8'))
