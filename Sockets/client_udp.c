@@ -13,16 +13,18 @@
 typedef enum Message_Type {
     JOIN = 0,
     JOIN_ACK = 1,
-    REGULAR = 2,
+    FREE = 2,
+    FULL = 3,
+    RETURN = 4,
 } Message_Type;
 
 typedef struct Token {
     char message[64];
     char dest_id[64];
+    char source_id[64];
     in_addr_t join_ip_address;
     in_port_t join_port;
     int cnt;
-    int is_free;
     Message_Type message_type;
 } Token;
 
@@ -54,6 +56,12 @@ void handle_join(struct sockaddr_in addr);
 
 void handle_join_ack(struct sockaddr_in addr);
 
+void handle_free();
+
+void handle_full();
+
+void handle_return();
+
 void join_token_ring();
 
 void handle_message();
@@ -64,7 +72,6 @@ struct sockaddr_in udp_receive();
 
 void send_message(int sig);
 
-
 int main(int argc, char **argv) {
     atexit(clean_exit);
     parse_args(argc, argv);
@@ -72,6 +79,8 @@ int main(int argc, char **argv) {
 
     join_token_ring();
     signal(SIGTSTP, send_message);
+
+    token.message_type = FREE;
     while (1) {
         forward_message();
         receive_message();
@@ -80,9 +89,7 @@ int main(int argc, char **argv) {
 
 }
 
-
 void send_message(int sig) {
-
     signal(SIGTSTP, send_message);
 
     if (is_pending_message) {
@@ -103,17 +110,14 @@ void send_message(int sig) {
 
     char *buffer2;
     size_t bufsize2 = 64;
-    size_t characters2;
     buffer2 = (char *) malloc(bufsize2 * sizeof(char));
-    characters2 = (size_t) getline(&buffer2, &bufsize2, stdin);
+    getline(&buffer2, &bufsize2, stdin);
 
     memset(pending_id, 0, 64);
     memset(pending_message, 0, 64);
 
     strcpy(pending_id, buffer1);
     strcpy(pending_message, buffer2);
-
-
 }
 
 void parse_args(int argc, char **argv) {
@@ -147,7 +151,6 @@ void parse_args(int argc, char **argv) {
         token.cnt = 0;
         token.join_port = 0;
         token.join_ip_address = 0;
-        token.is_free = 1;
     }
 }
 
@@ -184,7 +187,6 @@ void forward_message() {
         return;
     }
 
-    token.message_type = REGULAR;
     udp_send();
     have_token = 0;
 }
@@ -193,7 +195,6 @@ void receive_message() {
     struct sockaddr_in address = udp_receive();
 
     switch (token.message_type) {
-
         case JOIN:
             handle_join(address);
             receive_message();
@@ -201,21 +202,14 @@ void receive_message() {
         case JOIN_ACK:
             handle_join_ack(address);
             break;
-        case REGULAR:
-            have_token = 1;
-            if (strcmp(token.dest_id, user_id) == 0)
-                handle_message();
-            if (is_pending_message && token.is_free) {
-                is_pending_message = 0;
-                token.is_free = 0;
-                memset(token.dest_id, 0, 64);
-                memset(token.message, 0, 64);
-                strcpy(token.dest_id, pending_id);
-                strcpy(token.message, pending_message);
-                memset(pending_id, 0, 64);
-                memset(pending_message, 0, 64);
-            }
-            token.cnt++;
+        case FREE:
+            handle_free();
+            break;
+        case FULL:
+            handle_full();
+            break;
+        case RETURN:
+            handle_return();
             break;
     }
 
@@ -240,11 +234,46 @@ void handle_join_ack(struct sockaddr_in addr) {
     out_port = token.join_port;
 }
 
+void handle_free(){
+    have_token = 1;
+    if (is_pending_message) {
+        is_pending_message = 0;
+        memset(token.dest_id, 0, 64);
+        memset(token.source_id, 0, 64);
+        memset(token.message, 0, 64);
+        strcpy(token.dest_id, pending_id);
+        strcpy(token.source_id, user_id);
+        strcpy(token.message, pending_message);
+        memset(pending_id, 0, 64);
+        memset(pending_message, 0, 64);
+        token.message_type = FULL;
+    }
+    token.cnt++;
+}
+
+void handle_full(){
+    have_token = 1;
+    if (strcmp(token.dest_id, user_id) == 0){
+        handle_message();
+    }
+    token.cnt ++;
+}
+
+void handle_return(){
+    have_token = 1;
+    if(strcmp(user_id, token.source_id) == 0){
+        fprintf(stderr, "\nMessage delivered successfully\n");
+        memset(token.source_id, 0, 64);
+        token.cnt++;
+        token.message_type = FREE;
+    }
+}
+
 void handle_message() {
     fprintf(stderr, "\n\nThis is message for me: %s\n", token.message);
     memset(token.dest_id, 0, 64);
     memset(token.message, 0, 64);
-    token.is_free = 1;
+    token.message_type = RETURN;
 }
 
 void error_exit(char *error_message) {
@@ -272,7 +301,7 @@ struct sockaddr_in udp_receive() {
         sizeof(token))
         error_exit("message receive failure");
 
-    if (token.message_type == REGULAR)
+    if (token.message_type == FREE || token.message_type == FULL)
         fprintf(stderr, "\nReceived token: %d from %s %d\n", token.cnt, inet_ntoa(address.sin_addr),
                 ntohs(address.sin_port));
     return address;
