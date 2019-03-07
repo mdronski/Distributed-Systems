@@ -28,6 +28,7 @@ typedef struct Token {
     Message_Type message_type;
 } Token;
 
+
 Token token;
 Token tmp_token;
 char *user_id;
@@ -67,6 +68,8 @@ void join_token_ring();
 void handle_message();
 
 void udp_send();
+
+void udp_send_multicast();
 
 struct sockaddr_in udp_receive();
 
@@ -235,6 +238,7 @@ void handle_join_ack(struct sockaddr_in addr) {
 }
 
 void handle_free(){
+    udp_send_multicast();
     have_token = 1;
     if (is_pending_message) {
         is_pending_message = 0;
@@ -252,6 +256,7 @@ void handle_free(){
 }
 
 void handle_full(){
+    udp_send_multicast();
     have_token = 1;
     if (strcmp(token.dest_id, user_id) == 0){
         handle_message();
@@ -260,6 +265,7 @@ void handle_full(){
 }
 
 void handle_return(){
+    udp_send_multicast();
     have_token = 1;
     if(strcmp(user_id, token.source_id) == 0){
         fprintf(stderr, "\nMessage delivered successfully\n");
@@ -292,6 +298,18 @@ void udp_send() {
         error_exit("message send failure");
     }
     fprintf(stderr, "\nSend message to %s %d\n", inet_ntoa(address.sin_addr), ntohs(address.sin_port));
+}
+
+void udp_send_multicast(){
+    struct sockaddr_in address;
+    bzero(&address, sizeof(address));
+    address.sin_family = AF_INET;
+    address.sin_addr.s_addr = inet_addr("226.1.1.1");;
+    address.sin_port = htons((uint16_t) 5555);
+    if (sendto(udp_socket, user_id, strlen(user_id), 0, (const struct sockaddr *) &address, sizeof(address)) !=
+        strlen(user_id)) {
+        error_exit("message send failure");
+    }
 }
 
 struct sockaddr_in udp_receive() {
