@@ -10,6 +10,8 @@
 #include <signal.h>
 #include <jmorecfg.h>
 
+#define MAX_CLIENTS 4
+
 typedef enum Message_Type {
     JOIN = 0,
     JOIN_ACK = 1,
@@ -30,20 +32,21 @@ typedef struct Token {
 } Token;
 
 Token token;
-Token tmp_token;
 char *user_id;
 in_addr_t next_ip_address;
+int epoll_fd;
 int out_port;
 int in_port;
 int have_token;
 int tcp_in_socket;
+int tcp_out_socket;
 int is_pending_message;
 char pending_message[64];
 char pending_id[64];
 
 void forward_message();
 
-void receive_message();
+void receive_message(int socket);
 
 void clean_exit();
 
@@ -52,6 +55,10 @@ void error_exit(char *error_message);
 void parse_args(int argc, char **argv);
 
 void initialise_in_socket();
+
+void initialise_out_socket();
+
+void initialise_epoll_monitor();
 
 void handle_join(struct sockaddr_in addr);
 
@@ -69,28 +76,43 @@ void handle_message();
 
 void tcp_send();
 
-void udp_send_multicast();
+struct sockaddr_in tcp_receive(int socket);
 
-struct sockaddr_in tcp_receive();
+void register_socket(int socket);
 
 void send_message(int sig);
 
+void remove_socket(int socket);
+
+
 int main(int argc, char **argv) {
-    atexit(clean_exit);
+//    atexit(clean_exit);
+    signal(SIGINT, clean_exit);
     parse_args(argc, argv);
     initialise_in_socket();
+    initialise_epoll_monitor();
+    initialise_out_socket();
 
     join_token_ring();
     signal(SIGTSTP, send_message);
 
     token.message_type = FREE;
-    while (1) {
-        forward_message();
-        receive_message();
-        sleep(1);
+    struct epoll_event event;
+    forward_message();
+    while(1){
+        if(epoll_wait(epoll_fd, &event, 1, -1) == -1)
+            error_exit("epoll wait failure");
+
+        if(event.data.fd < 0){
+            register_socket(-event.data.fd);
+        }else{
+            receive_message(event.data.fd);
+        }
     }
 
 }
+
+
 
 void send_message(int sig) {
     signal(SIGTSTP, send_message);
@@ -161,9 +183,12 @@ void parse_args(int argc, char **argv) {
 
 void initialise_in_socket() {
 
-    tcp_in_socket = socket(AF_INET, SOCK_DGRAM, 0);
+    tcp_in_socket = socket(AF_INET, SOCK_STREAM, 0);
     if (tcp_in_socket == -1)
         error_exit("ip socket creation failure");
+
+    int true = 1;
+    setsockopt(tcp_in_socket, SOL_SOCKET, SO_REUSEADDR, &true, sizeof(int));
 
     struct sockaddr_in in_address;
     bzero(&in_address, sizeof(in_address));
@@ -174,16 +199,71 @@ void initialise_in_socket() {
     if (bind(tcp_in_socket, (const struct sockaddr *) &in_address, sizeof(in_address)) == -1)
         error_exit("in socket bind failure");
 
-    fprintf(stderr, "Socket initialised\n");
+    if (listen(tcp_in_socket, MAX_CLIENTS) == -1)
+        error_exit("in socket listen failure");
+
+    fprintf(stderr, "In socket initialised\n");
+}
+
+void initialise_out_socket() {
+
+    if (tcp_out_socket != 0){
+        if (shutdown(tcp_out_socket, SHUT_RDWR) == -1)
+            error_exit("out socket shutdown failure");
+        if (close(tcp_out_socket) == -1)
+            error_exit("out socket close failure");
+    }
+
+    tcp_out_socket = socket(AF_INET, SOCK_STREAM, 0);
+    if (tcp_out_socket == -1)
+        error_exit("out socket creation failure");
+    int true = 1;
+    setsockopt(tcp_out_socket, SOL_SOCKET, SO_REUSEADDR, &true, sizeof(int));
+
+    struct sockaddr_in address;
+    bzero(&address, sizeof(address));
+    address.sin_family = AF_INET;
+    address.sin_addr.s_addr = next_ip_address;
+    address.sin_port = htons((uint16_t) out_port);
+
+    if (connect(tcp_out_socket, (const struct sockaddr *) &address, sizeof(address)) == -1)
+        error_exit("out socket connect failure");
+
+    fprintf(stderr, "out socket initialised\n");
+}
+
+void initialise_epoll_monitor(){
+    epoll_fd= epoll_create1(0);
+    if (epoll_fd == -1)
+        error_exit("epoll_fd monitor creation failure");
+
+    struct epoll_event epoll_event1;
+    epoll_event1.events = EPOLLIN | EPOLLPRI;
+    epoll_event1.data.fd = -tcp_in_socket;
+
+    if (epoll_ctl(epoll_fd, EPOLL_CTL_ADD, tcp_in_socket, &epoll_event1) == -1)
+        error_exit("adding socket under epoll monitoring failure");
+
+}
+
+void register_socket(int socket){
+    int new_client = accept(socket, NULL, NULL);
+    if (new_client == -1)
+        error_exit("client registration failure");
+
+    struct epoll_event epoll_event1;
+    epoll_event1.events = EPOLLIN | EPOLLPRI;
+    epoll_event1.data.fd = new_client;
+
+    if(epoll_ctl(epoll_fd, EPOLL_CTL_ADD, new_client, &epoll_event1) == -1)
+        error_exit("adding new client under epoll monitoring failure");
+
 }
 
 void join_token_ring() {
     token.message_type = JOIN;
-
+    token.join_port = (in_port_t) in_port;
     tcp_send();
-
-    receive_message();
-//    printf("joined to %s %d\n", next_ip_address, ntohs(address.sin_port));
 }
 
 void forward_message() {
@@ -196,13 +276,14 @@ void forward_message() {
     have_token = 0;
 }
 
-void receive_message() {
-    struct sockaddr_in address = tcp_receive();
+void receive_message(int socket) {
+    struct sockaddr_in address = tcp_receive(socket);
+    if (address.sin_port == 0)
+        return;
 
     switch (token.message_type) {
         case JOIN:
             handle_join(address);
-            receive_message();
             break;
         case JOIN_ACK:
             handle_join_ack(address);
@@ -217,18 +298,23 @@ void receive_message() {
             handle_return();
             break;
     }
+    forward_message();
+    usleep(500000);
 
 }
 
 void handle_join(struct sockaddr_in addr) {
     printf("Received join request from %s %d\n", inet_ntoa(addr.sin_addr), ntohs(addr.sin_port));
 
+    in_port_t new_out_port = token.join_port;
+
     token.message_type = JOIN_ACK;
     token.join_ip_address = next_ip_address;
     token.join_port = (in_port_t) out_port;
 
     next_ip_address = addr.sin_addr.s_addr;
-    out_port = ntohs(addr.sin_port);
+    out_port = new_out_port;
+    initialise_out_socket();
     tcp_send();
 }
 
@@ -237,10 +323,10 @@ void handle_join_ack(struct sockaddr_in addr) {
 
     next_ip_address = token.join_ip_address;
     out_port = token.join_port;
+    initialise_out_socket();
 }
 
 void handle_free() {
-    udp_send_multicast();
     have_token = 1;
     if (is_pending_message) {
         is_pending_message = 0;
@@ -258,7 +344,6 @@ void handle_free() {
 }
 
 void handle_full() {
-    udp_send_multicast();
     have_token = 1;
     if (strcmp(token.dest_id, user_id) == 0) {
         handle_message();
@@ -278,7 +363,6 @@ void handle_full() {
 }
 
 void handle_return() {
-    udp_send_multicast();
     have_token = 1;
     if (strcmp(user_id, token.source_id) == 0) {
         fprintf(stderr, "\nMessage delivered successfully\n");
@@ -301,38 +385,30 @@ void error_exit(char *error_message) {
 }
 
 void tcp_send() {
-    struct sockaddr_in address;
-    bzero(&address, sizeof(address));
-    address.sin_family = AF_INET;
-    address.sin_addr.s_addr = next_ip_address;
-    address.sin_port = htons((uint16_t) out_port);
-    if (sendto(tcp_in_socket, &token, sizeof(token), 0, (const struct sockaddr *) &address, sizeof(address)) !=
-        sizeof(token)) {
+
+    if (write(tcp_out_socket, &token, sizeof(token)) != sizeof(token)) {
         error_exit("message send failure");
     }
-    fprintf(stderr, "\nSend message to %s %d\n", inet_ntoa(address.sin_addr), ntohs(address.sin_port));
+    struct sockaddr_in in_address;
+    bzero(&in_address, sizeof(in_address));
+    in_address.sin_family = AF_INET;
+    in_address.sin_addr.s_addr = next_ip_address;
+    in_address.sin_port = htons((uint16_t) in_port);
+    fprintf(stderr, "\nSend message to %s %d\n", inet_ntoa(in_address.sin_addr), out_port);
 }
 
-void udp_send_multicast() {
-    struct sockaddr_in address;
-    bzero(&address, sizeof(address));
-    address.sin_family = AF_INET;
-    address.sin_addr.s_addr = inet_addr("226.1.1.1");;
-    address.sin_port = htons((uint16_t) 5555);
-    if (sendto(tcp_in_socket, user_id, strlen(user_id), 0, (const struct sockaddr *) &address, sizeof(address)) !=
-        strlen(user_id)) {
-        error_exit("message send failure");
-    }
-}
-
-struct sockaddr_in tcp_receive() {
+struct sockaddr_in tcp_receive(int socket) {
     struct sockaddr_in address;
     int len = sizeof(address);
-    if (recvfrom(tcp_in_socket, &token, sizeof(token), 0, (struct sockaddr *) &address, (socklen_t *) &len) !=
-        sizeof(token))
-        error_exit("message receive failure");
+    if (read(socket, &token, sizeof(token)) != sizeof(token)){
+        remove_socket(socket);
+        address.sin_port = 0;
+        return address;
+    }
 
-    if (token.message_type == FREE || token.message_type == FULL)
+    getpeername(socket, (struct sockaddr *) &address, (socklen_t *) &len);
+
+    if (token.message_type == FREE || token.message_type == FULL || token.message_type == RETURN)
         fprintf(stderr, "\nReceived token: %d from %s %d\n", token.cnt, inet_ntoa(address.sin_addr),
                 ntohs(address.sin_port));
     return address;
@@ -340,11 +416,34 @@ struct sockaddr_in tcp_receive() {
 
 void clean_exit() {
 
+
+    if(close(epoll_fd) == -1){
+        perror("closing epoll failure");
+    }
+
+    if (shutdown(tcp_out_socket, SHUT_RDWR) == -1) {
+        perror("shutdown out socket failure");
+    }
+
+    if (close(tcp_out_socket) == -1) {
+        perror("closing in socket failure");
+    }
+
     if (close(tcp_in_socket) == -1) {
         perror("closing in socket failure");
     }
 
+
     printf("\nClosed sockets");
     printf("\nExited\n");
+    exit(EXIT_SUCCESS);
 }
 
+void remove_socket(int socket){
+    if(epoll_ctl(epoll_fd, EPOLL_CTL_DEL, socket, NULL) == -1)
+        error_exit("removing socket from epoll monitor failure");
+    if(shutdown(socket, SHUT_RDWR) == -1)
+        error_exit("socket shutdown failure");
+    if(close(socket) == -1)
+        error_exit("socket close failure");
+}
