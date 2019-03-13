@@ -202,6 +202,19 @@ void initialise_in_socket() {
     if (listen(tcp_in_socket, MAX_CLIENTS) == -1)
         error_exit("in socket listen failure");
 
+    char myIP[16];
+    unsigned int myPort;
+    struct sockaddr_in server_addr, my_addr;
+    bzero(&my_addr, sizeof(my_addr));
+    int len = sizeof(my_addr);
+    getsockname(tcp_in_socket, (struct sockaddr *) &my_addr, (socklen_t *) &len);
+    inet_ntop(AF_INET, &my_addr.sin_addr, myIP, sizeof(myIP));
+    myPort = ntohs(my_addr.sin_port);
+
+    printf("Local ip address: %s\n", myIP);
+    printf("Local port : %u\n", myPort);
+
+
     fprintf(stderr, "In socket initialised\n");
 }
 
@@ -228,6 +241,20 @@ void initialise_out_socket() {
 
     if (connect(tcp_out_socket, (const struct sockaddr *) &address, sizeof(address)) == -1)
         error_exit("out socket connect failure");
+
+    char myIP[16];
+    unsigned int myPort;
+    struct sockaddr_in server_addr, my_addr;
+    bzero(&my_addr, sizeof(my_addr));
+    int len = sizeof(my_addr);
+    getsockname(tcp_out_socket, (struct sockaddr *) &my_addr, (socklen_t *) &len);
+    inet_ntop(AF_INET, &my_addr.sin_addr, myIP, sizeof(myIP));
+    myPort = ntohs(my_addr.sin_port);
+
+    printf("Sending to ip address: %s\n", myIP);
+    printf("Sending to port : %u\n", myPort);
+
+
 
     fprintf(stderr, "out socket initialised\n");
 }

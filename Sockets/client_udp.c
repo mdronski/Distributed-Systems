@@ -30,13 +30,12 @@ typedef struct Token {
 } Token;
 
 Token token;
-Token tmp_token;
 char *user_id;
 in_addr_t next_ip_address;
 int out_port;
 int in_port;
 int have_token;
-int tcp_in_socket;
+int udp_socket;
 int is_pending_message;
 char pending_message[64];
 char pending_id[64];
@@ -51,7 +50,7 @@ void error_exit(char *error_message);
 
 void parse_args(int argc, char **argv);
 
-void initialise_in_socket();
+void initialise_socket();
 
 void handle_join(struct sockaddr_in addr);
 
@@ -67,18 +66,18 @@ void join_token_ring();
 
 void handle_message();
 
-void tcp_send();
+void udp_send();
 
 void udp_send_multicast();
 
-struct sockaddr_in tcp_receive();
+struct sockaddr_in udp_receive();
 
 void send_message(int sig);
 
 int main(int argc, char **argv) {
     atexit(clean_exit);
     parse_args(argc, argv);
-    initialise_in_socket();
+    initialise_socket();
 
     join_token_ring();
     signal(SIGTSTP, send_message);
@@ -159,10 +158,10 @@ void parse_args(int argc, char **argv) {
     }
 }
 
-void initialise_in_socket() {
+void initialise_socket() {
 
-    tcp_in_socket = socket(AF_INET, SOCK_DGRAM, 0);
-    if (tcp_in_socket == -1)
+    udp_socket = socket(AF_INET, SOCK_DGRAM, 0);
+    if (udp_socket == -1)
         error_exit("ip socket creation failure");
 
     struct sockaddr_in in_address;
@@ -171,8 +170,21 @@ void initialise_in_socket() {
     in_address.sin_addr.s_addr = INADDR_ANY;
     in_address.sin_port = htons((uint16_t) in_port);
 
-    if (bind(tcp_in_socket, (const struct sockaddr *) &in_address, sizeof(in_address)) == -1)
+    if (bind(udp_socket, (const struct sockaddr *) &in_address, sizeof(in_address)) == -1)
         error_exit("in socket bind failure");
+
+    char myIP[16];
+    unsigned int myPort;
+    struct sockaddr_in server_addr, my_addr;
+    bzero(&my_addr, sizeof(my_addr));
+    int len = sizeof(my_addr);
+    getsockname(udp_socket, (struct sockaddr *) &my_addr, (socklen_t *) &len);
+    inet_ntop(AF_INET, &my_addr.sin_addr, myIP, sizeof(myIP));
+    myPort = ntohs(my_addr.sin_port);
+
+    printf("Local ip address: %s\n", myIP);
+    printf("Local port : %u\n", myPort);
+
 
     fprintf(stderr, "Socket initialised\n");
 }
@@ -180,7 +192,7 @@ void initialise_in_socket() {
 void join_token_ring() {
     token.message_type = JOIN;
 
-    tcp_send();
+    udp_send();
 
     receive_message();
 //    printf("joined to %s %d\n", next_ip_address, ntohs(address.sin_port));
@@ -192,12 +204,12 @@ void forward_message() {
         return;
     }
 
-    tcp_send();
+    udp_send();
     have_token = 0;
 }
 
 void receive_message() {
-    struct sockaddr_in address = tcp_receive();
+    struct sockaddr_in address = udp_receive();
 
     switch (token.message_type) {
         case JOIN:
@@ -229,7 +241,7 @@ void handle_join(struct sockaddr_in addr) {
 
     next_ip_address = addr.sin_addr.s_addr;
     out_port = ntohs(addr.sin_port);
-    tcp_send();
+    udp_send();
 }
 
 void handle_join_ack(struct sockaddr_in addr) {
@@ -300,13 +312,13 @@ void error_exit(char *error_message) {
     exit(EXIT_FAILURE);
 }
 
-void tcp_send() {
+void udp_send() {
     struct sockaddr_in address;
     bzero(&address, sizeof(address));
     address.sin_family = AF_INET;
     address.sin_addr.s_addr = next_ip_address;
     address.sin_port = htons((uint16_t) out_port);
-    if (sendto(tcp_in_socket, &token, sizeof(token), 0, (const struct sockaddr *) &address, sizeof(address)) !=
+    if (sendto(udp_socket, &token, sizeof(token), 0, (const struct sockaddr *) &address, sizeof(address)) !=
         sizeof(token)) {
         error_exit("message send failure");
     }
@@ -319,16 +331,16 @@ void udp_send_multicast() {
     address.sin_family = AF_INET;
     address.sin_addr.s_addr = inet_addr("226.1.1.1");;
     address.sin_port = htons((uint16_t) 5555);
-    if (sendto(tcp_in_socket, user_id, strlen(user_id), 0, (const struct sockaddr *) &address, sizeof(address)) !=
+    if (sendto(udp_socket, user_id, strlen(user_id), 0, (const struct sockaddr *) &address, sizeof(address)) !=
         strlen(user_id)) {
         error_exit("message send failure");
     }
 }
 
-struct sockaddr_in tcp_receive() {
+struct sockaddr_in udp_receive() {
     struct sockaddr_in address;
     int len = sizeof(address);
-    if (recvfrom(tcp_in_socket, &token, sizeof(token), 0, (struct sockaddr *) &address, (socklen_t *) &len) !=
+    if (recvfrom(udp_socket, &token, sizeof(token), 0, (struct sockaddr *) &address, (socklen_t *) &len) !=
         sizeof(token))
         error_exit("message receive failure");
 
@@ -340,7 +352,7 @@ struct sockaddr_in tcp_receive() {
 
 void clean_exit() {
 
-    if (close(tcp_in_socket) == -1) {
+    if (close(udp_socket) == -1) {
         perror("closing in socket failure");
     }
 
