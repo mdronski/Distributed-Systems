@@ -10,30 +10,40 @@ import com.rabbitmq.client.Envelope;
 import java.io.BufferedReader;
 import java.io.IOException;
 import java.io.InputStreamReader;
+import java.text.DateFormat;
+import java.text.SimpleDateFormat;
+import java.time.LocalDate;
+import java.util.Date;
 import java.util.concurrent.TimeoutException;
 
 public class AdminConnection {
     private ConnectionFactory factory;
     private Connection connection;
     private Channel channel;
-    private final String EXCHANGE_NAME = "admin_exchange";
+    private static final String EXCHANGE_NAME = "admin_exchange";
     private String QUEUE_NAME;
+    public static final String KEY_LOG = "log";
+    public static final String KEY_MESSAGE = "message";
 
-    public AdminConnection() throws IOException, TimeoutException {
+    public AdminConnection() {
         // connection & channel
         factory = new ConnectionFactory();
         factory.setHost("localhost");
 
-        connection = factory.newConnection();
-        channel = connection.createChannel();
+        try {
+            connection = factory.newConnection();
+            channel = connection.createChannel();
+            // exchange
+            channel.exchangeDeclare(EXCHANGE_NAME, BuiltinExchangeType.DIRECT);
 
-        // exchange
-        channel.exchangeDeclare(EXCHANGE_NAME, BuiltinExchangeType.FANOUT);
+//             queue
+            QUEUE_NAME = channel.queueDeclare().getQueue();
+            channel.queueBind(QUEUE_NAME, EXCHANGE_NAME, KEY_MESSAGE);
+            startListening();
+        } catch (IOException | TimeoutException e) {
+            e.printStackTrace();
+        }
 
-        // queue
-        QUEUE_NAME = channel.queueDeclare().getQueue();
-        channel.queueBind(QUEUE_NAME, EXCHANGE_NAME, "");
-        startListening();
     }
 
 
@@ -58,11 +68,17 @@ public class AdminConnection {
                 }
             }
         };
+        thread.start();
     }
 
     public void log(String message){
         try {
-            channel.basicPublish("", QUEUE_NAME, null, message.getBytes());
+            Date date = new Date();
+            String strDateFormat = "hh:mm:ss a";
+            DateFormat dateFormat = new SimpleDateFormat(strDateFormat);
+            String formattedDate= dateFormat.format(date);
+            message = formattedDate + " " + message;
+            channel.basicPublish(EXCHANGE_NAME, KEY_LOG, null, message.getBytes());
         } catch (IOException e) {
             e.printStackTrace();
         }

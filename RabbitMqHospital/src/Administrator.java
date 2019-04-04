@@ -12,27 +12,31 @@ import java.io.IOException;
 import java.io.InputStreamReader;
 
 public class Administrator {
+    private static final String ADMIN_EXCHANGE = "admin_exchange";
+//    private static final String QUEUE_NAME = "admin_queue";
+    private static String QUEUE_NAME;
+    public static final String KEY_LOG = "log";
+    public static final String KEY_MESSAGE = "message";
+
     public static void main(String[] argv) throws Exception {
 
-        // info
         System.out.println("ADMINISTRATOR");
 
-        // connection & channel
         ConnectionFactory factory = new ConnectionFactory();
         factory.setHost("localhost");
         Connection connection = factory.newConnection();
         Channel channel = connection.createChannel();
 
-        // exchange
-        String EXCHANGE_NAME = "admin_exchange";
-        channel.exchangeDeclare(EXCHANGE_NAME, BuiltinExchangeType.FANOUT);
+        channel.exchangeDeclare(ADMIN_EXCHANGE, BuiltinExchangeType.DIRECT);
 
-        // queue
-        String QUEUE_NAME = channel.queueDeclare().getQueue();
-        channel.queueBind(QUEUE_NAME, EXCHANGE_NAME, "");
-        System.out.println("created admin queue: " + QUEUE_NAME);
+        QUEUE_NAME = channel.queueDeclare().getQueue();
+        channel.queueBind(QUEUE_NAME, ADMIN_EXCHANGE, KEY_LOG);
 
-        // consumer (message handling)
+        handleMessages(channel);
+        sendMessages(channel);
+    }
+
+    private static void handleMessages(Channel channel) throws IOException {
         Consumer consumer = new DefaultConsumer(channel) {
             @Override
             public void handleDelivery(String consumerTag, Envelope envelope, AMQP.BasicProperties properties, byte[] body) throws IOException {
@@ -52,9 +56,10 @@ public class Administrator {
                 }
             }
         };
-        System.out.println("Waiting for messages...");
-        System.out.println("Now you can send messages to others!");
+        thread.start();
+    }
 
+    private static void sendMessages(Channel channel) throws IOException {
         while (true) {
             // read msg
             BufferedReader br = new BufferedReader(new InputStreamReader(System.in));
@@ -67,9 +72,8 @@ public class Administrator {
             }
 
             // publish
-            channel.basicPublish("", QUEUE_NAME, null, message.getBytes());
+            channel.basicPublish(ADMIN_EXCHANGE, KEY_MESSAGE, null, message.getBytes());
             System.out.println("Sent: " + message);
         }
-
     }
 }
