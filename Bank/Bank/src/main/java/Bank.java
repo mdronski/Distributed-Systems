@@ -1,4 +1,4 @@
-package main.java;
+//package main.java;
 
 import java.util.HashMap;
 import java.util.Map;
@@ -14,6 +14,7 @@ import org.apache.thrift.server.TSimpleServer;
 import org.apache.thrift.transport.TServerSocket;
 import org.apache.thrift.transport.TServerTransport;
 import org.apache.thrift.transport.TTransportException;
+
 
 public class Bank {
     public static void main(String[] args) throws TTransportException {
