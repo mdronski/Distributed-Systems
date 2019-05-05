@@ -1,3 +1,5 @@
+package main.java;
+
 import java.util.HashMap;
 import java.util.Map;
 import Bank.CreateAccountData;
@@ -12,14 +14,14 @@ public class BankClients {
 
     public void addClient(AccountData data) throws Exception {
         if (clients.containsKey(data.getGuid()))
-            throw new Exception("Client already exists");
+            throw new Exception("CreationClient already exists");
 
         clients.put(data.getGuid(), data);
     }
 
     public AccountData getClient(String guid) throws Exception {
         if (!clients.containsKey(guid))
-            throw new Exception("Client does not exist");
+            throw new Exception("CreationClient does not exist");
 
         return clients.get(guid);
     }

@@ -1,3 +1,5 @@
+package main.java;
+
 import Bank.AccountCreationService;
 import Bank.AccountData;
 import Bank.CreateAccountData;
