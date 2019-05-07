@@ -10,6 +10,7 @@ public class BankClients {
     }
 
     public void addClient(AccountData data) throws Exception {
+        String key = MD5.md5Hash(data.getGuid());
         if (clients.containsKey(data.getGuid()))
             throw new Exception("Client already exists");
 

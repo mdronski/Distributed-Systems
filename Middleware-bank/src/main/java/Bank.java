@@ -24,15 +24,24 @@ public class Bank {
 
         Runnable init2 = () -> {
             try {
-                initAccountManagers(bankClients);
+                initAccountManagers(bankClients, exchangeRates);
             } catch (TTransportException e) {
                 e.printStackTrace();
             }
         };
 
+        Runnable init3 = () -> {
+            try {
+                CurrencyClient client = new CurrencyClient(exchangeRates);
+                client.start();
+            } catch (Exception e) {
+                e.printStackTrace();
+            }
+        };
 
         new Thread(init1).start();
         new Thread(init2).start();
+        new Thread(init3).start();
     }
 
     public static void initCreation(BankClients bankClients) throws TTransportException {
@@ -49,11 +58,14 @@ public class Bank {
         server.serve();
     }
 
-    public static void initAccountManagers(BankClients bankClients) throws TTransportException {
+    public static void initAccountManagers(BankClients bankClients, ExchangeRates exchangeRates) throws TTransportException {
         int creationSocket = 9998;
 
         BasicAccountService.Processor<BasicAccountManager> basicAccountManagerProcessor =
                 new BasicAccountService.Processor<>(new BasicAccountManager(bankClients));
+
+        PremiumAccountServie.Processor<PremiumAccountManager> premiumAccountManagerProcessor =
+                new PremiumAccountServie.Processor<>(new PremiumAccountManager(bankClients, exchangeRates));
 
 
         TServerTransport serverTransport = new TServerSocket(creationSocket);
@@ -61,6 +73,7 @@ public class Bank {
 
         TMultiplexedProcessor multiplex = new TMultiplexedProcessor();
         multiplex.registerProcessor("B", basicAccountManagerProcessor);
+        multiplex.registerProcessor("L", premiumAccountManagerProcessor);
 
         TServer server = new TSimpleServer(new TServer.Args(serverTransport).protocolFactory(protocolFactory).processor(multiplex));
         System.out.println("Starting the account management server...");

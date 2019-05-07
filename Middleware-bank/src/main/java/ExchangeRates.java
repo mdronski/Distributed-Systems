@@ -14,4 +14,8 @@ public class ExchangeRates {
     public Double getCurrencyRate(Currency currency){
         return rates.get(currency);
     }
+
+    public void setCurrencyRate(Currency currency, Double rate){
+        rates.put(currency, rate);
+    }
 }

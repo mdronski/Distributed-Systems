@@ -3,7 +3,7 @@ import org.apache.thrift.TException;
 import Bank.*;
 
 public class BasicAccountManager implements BasicAccountService.Iface{
-    private BankClients clients;
+    public BankClients clients;
 
     public BasicAccountManager(BankClients clients) {
         this.clients = clients;

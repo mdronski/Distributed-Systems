@@ -1,0 +1,27 @@
+syntax = "proto3";
+package currency;
+
+enum Currency {
+    EUR = 0;
+    USD = 1;
+    GBP = 2;
+    PLN = 3;
+}
+
+message Rate {
+    Currency currency = 1;
+    double rate = 2;
+}
+
+message Request {
+    repeated Currency currencies = 1;
+}
+
+message Response {
+    repeated Rate rates = 1;
+}
+
+service ExchangeService {
+    rpc ActualRates(Request) returns (Response) {}
+    rpc RatesStream(Request) returns (stream Rate) {}
+}
