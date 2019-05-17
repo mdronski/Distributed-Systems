@@ -1,4 +1,4 @@
-import actors.MainActor
+import actors.RemoteActor
 import akka.actor.{ActorSystem, Props}
 import database.operations.{Find, Order, StreamText}
 
@@ -6,7 +6,7 @@ import scala.io.StdIn
 
 object Main extends App {
   val system: ActorSystem = ActorSystem("HelloSystem")
-  val mainActor = system.actorOf(Props[MainActor], "mainActor")
+  val mainActor = system.actorOf(Props[RemoteActor], "mainActor")
   val search = "s (.+)".r
   val order = "o (.+)".r
   val textStream = "t (.+)".r

@@ -2,11 +2,11 @@ package actors
 
 import akka.actor.{Actor, ActorLogging, ActorRef, ActorSystem, Props}
 import database.Book
-import database.operations.{Find, Order}
+import database.operations.{Find, FindResult, Order}
 
 class FindActor extends Actor with ActorLogging{
-  val db1 = "/database/db1/titles.txt"
-  val db2 = "/database/db2/titles.txt"
+  val db1 = "/database/db1"
+  val db2 = "/database/db2"
   val system = ActorSystem("order")
   val db1Actor: ActorRef = createFindActor(db1, "db1Actor")
   val db2Actor: ActorRef = createFindActor(db2, "db2Actor")
@@ -22,10 +22,10 @@ class FindActor extends Actor with ActorLogging{
       db2Actor ! find
       context.become(receive(sender, NO_RESPONSES))
 
-    case book: Option[Book] if book.isDefined && responses == NO_RESPONSES =>
-      s ! book
-      println("Found")
-      context.become(receive(s, ALREADY_SEND))
+    case book: Option[Book]
+      if book.isDefined && responses == NO_RESPONSES || book.isDefined && responses == ONE_RESPONSE =>
+        s ! new FindResult(book)
+        context.stop(self)
 
     case book: Option[Book] if book.isDefined && responses == ALREADY_SEND =>
       context.become(receive(s, ALREADY_SEND))
@@ -34,9 +34,8 @@ class FindActor extends Actor with ActorLogging{
       context.become(receive(s, ONE_RESPONSE))
 
     case book: Option[Book] if book.isEmpty && responses == ONE_RESPONSE =>
-      println("Not Found")
-      s ! book
-      context.become(receive(s, ONE_RESPONSE))
+      s ! new FindResult(book)
+      context.stop(self)
 
     case msg => log.info(s"Unknown message $msg")
   }

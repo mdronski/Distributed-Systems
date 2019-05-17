@@ -1,3 +1,3 @@
 package database.operations
 
-class StreamText(title: String) extends DBOperation(title)
+class StreamText(val title: String) extends Serializable

@@ -1,3 +1,3 @@
 package database.operations
 
-final class Find(title: String) extends DBOperation(title)
+final class Find(val title: String)  extends Serializable

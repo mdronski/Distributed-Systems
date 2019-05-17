@@ -1,61 +1,47 @@
 package actors
 
-import java.nio.file.{Path, Paths}
-
-import akka.Done
 import akka.actor.{Actor, ActorLogging, ActorRef, ActorSystem, Props}
-import akka.stream.{ActorMaterializer, IOResult, ThrottleMode}
-import akka.stream.scaladsl.{FileIO, Framing, Sink}
-import akka.util.ByteString
+import akka.stream.ActorMaterializer
 import database.Book
-import database.operations.{Find, StreamText}
+import database.operations._
+import utils.DatabasePathParser
 
-import scala.concurrent.Future
-import scala.concurrent.duration._
 import scala.io.Source
-import java.io._
 
-class TextStreamActor extends Actor with ActorLogging{
+class TextStreamActor extends Actor with ActorLogging {
   val system = ActorSystem("TextStream")
-  private val findActor = system.actorOf(Props[FindActor], "findActor")
-  implicit val materializer = ActorMaterializer()
+  private val findActor = system.actorOf(Props[FindActor], "textStreamfindActor")
+  implicit val materializer: ActorMaterializer = ActorMaterializer()
+
+  override def receive: Receive = {receive(sender)}
 
 
-  override def receive: Receive = receive(sender)
-
-
-  def receive(sender: ActorRef): Receive = {
+  def receive(s: ActorRef): Receive = {
     case textStream: StreamText =>
       findActor ! new Find(textStream.title)
       context.become(receive(sender))
 
-    case book: Option[Book] if book.isEmpty =>
-      sender ! None
-
-    case book: Option[Book] if book.isDefined =>
-      getStream(book.get)
-      sender ! getStream(book.get)
+    case findResult: FindResult =>
+      findResult.book match {
+        case Some(book) =>
+          val source = getStream(book)
+          source.toStream.foreach(line => {
+            s ! new StreamTextResult(Option(line))
+            Thread.sleep(1000)
+          })
+          context.stop(self)
+        case None =>
+          s ! new StreamTextResult(None)
+          context.stop(self)
+      }
 
     case msg => log.info(s"Unknown message $msg")
+      context.stop(self)
   }
 
-  private def getStream(book: Book): Future[Done] = {
-
-//
-//    val f2 = new File(Source.fromURL(getClass.getResource(book.db)).toString())
-//    val file = Paths.get(book.db)
-//    f2.r
-//    val splitter = Framing.delimiter(
-//      ByteString("\n"),
-//      maximumFrameLength = 1024,
-//      allowTruncation = true
-//    )
-//
-//    FileIO.fromFile(f2)
-//      .via(splitter)
-//      .map(_.utf8String)
-//      .throttle(1, 1.second, 1, ThrottleMode.shaping)
-//      .runForeach(x => println(x))
+  private def getStream(book: Book) = {
+    val filePath = getClass.getResource(DatabasePathParser.getBookPath(book.db, book.title)).getFile
+    Source.fromFile(filePath).getLines()
 
   }
 }
