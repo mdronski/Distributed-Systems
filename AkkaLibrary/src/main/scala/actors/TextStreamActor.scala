@@ -1,16 +1,17 @@
 package actors
 
-import akka.actor.{Actor, ActorLogging, ActorRef, ActorSystem, Props}
+import akka.actor.SupervisorStrategy.Stop
+import akka.actor.{Actor, ActorLogging, ActorRef, ActorSystem, OneForOneStrategy, Props, SupervisorStrategy}
 import akka.stream.ActorMaterializer
 import database.Book
 import database.operations._
 import utils.DatabasePathParser
 
 import scala.io.Source
+import scala.concurrent.duration._
 
 class TextStreamActor extends Actor with ActorLogging {
-  val system = ActorSystem("TextStream")
-  private val findActor = system.actorOf(Props[FindActor], "textStreamfindActor")
+  private val findActor = context.actorOf(Props[FindActor], "textStreamfindActor")
   implicit val materializer: ActorMaterializer = ActorMaterializer()
 
   override def receive: Receive = {receive(sender)}
@@ -42,6 +43,10 @@ class TextStreamActor extends Actor with ActorLogging {
   private def getStream(book: Book) = {
     val filePath = getClass.getResource(DatabasePathParser.getBookPath(book.db, book.title)).getFile
     Source.fromFile(filePath).getLines()
-
   }
+
+  override def supervisorStrategy: SupervisorStrategy =
+    OneForOneStrategy(maxNrOfRetries = 5, withinTimeRange = 10 seconds) {
+      case _ => Stop
+    }
 }

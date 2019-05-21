@@ -13,15 +13,15 @@ object LocalApp extends App {
 
   val system: ActorSystem = ActorSystem("LocalSystem", config)
   val localActor = system.actorOf(Props[LocalActor])
-  val search = "s (.+)".r
+  val search = "f (.+)".r
   val order = "o (.+)".r
-  val textStream = "t (.+)".r
+  val textStream = "s (.+)".r
 
 
   println("Operations:")
-  println("s <title>     //searches for given title in db and print its price")
+  println("f <title>     //finds title in db and print its price")
   println("o <title>     //place an order for a given title")
-  println("t <title>     //print content of a given title, line by line in 1 second intervals")
+  println("s <title>     //streams content of a given title, line by line in 1 second intervals")
   println("x             // shutdown application")
 
   Iterator.continually(StdIn.readLine())

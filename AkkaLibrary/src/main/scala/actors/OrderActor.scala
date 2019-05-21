@@ -1,13 +1,15 @@
 package actors
 
-import akka.actor.{Actor, ActorLogging, ActorRef, ActorSystem, Props}
+import akka.actor.SupervisorStrategy.Stop
+import akka.actor.{Actor, ActorLogging, ActorRef, ActorSystem, OneForOneStrategy, Props, SupervisorStrategy}
 import akka.stream.ActorMaterializer
 import database.{Book, OrderManager}
 import database.operations._
 
+import scala.concurrent.duration._
+
 class OrderActor extends Actor with ActorLogging{
-  val system = ActorSystem("TextStream")
-  private val findActor = system.actorOf(Props[FindActor], "ordersFindActor")
+  private val findActor = context.actorOf(Props[FindActor], "ordersFindActor")
   implicit val materializer = ActorMaterializer()
 
   override def receive: Receive = receive(sender)
@@ -34,5 +36,9 @@ class OrderActor extends Actor with ActorLogging{
     OrderManager.makeOrder(book)
   }
 
+  override def supervisorStrategy: SupervisorStrategy =
+    OneForOneStrategy(maxNrOfRetries = 5, withinTimeRange = 10 seconds) {
+      case _ => Stop
+    }
 
 }
